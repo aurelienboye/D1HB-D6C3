@@ -1,0 +1,115 @@
+---
+title: "Analyse des données de SAR annuelles"
+author: "A. Boyé"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  rmdformats::readthedown:
+    code_folding: "hide"
+    highlight: "tango"
+    lightbox: TRUE
+    gallery: TRUE
+    thumbnails: FALSE # if TRUE display content images as thumbnails
+    toc_depth: 6
+    use_bookdown: true
+    fig_caption: true
+editor_options: 
+  chunk_output_type: console
+#params:
+# value:
+#    label: "Valeur :"
+#    value: median
+#    input: select
+#    choices: [pct25,median,pct75]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE, cache = TRUE)
+
+# Option of knitr to not print the NAs. Can be desactivated with `options(opts)` 
+opts <- options(knitr.kable.NA = "")
+```
+
+---
+
+# Packages
+
+```{r}
+library(tidyverse) # package for data handling
+library(ncdf4) # package for netcdf manipulation
+library(raster) # package for raster and brick manipulation
+library(broom) # to tidy model outputs
+
+library(rasterVis) # for visulisation of the raster
+library(viridis)
+library(plotly)
+library(gganimate)
+
+library(furrr) # parralelisation
+plan(multisession)
+```
+
+# Functions
+
+```{r}
+rename_monthly_layers <- function(x){
+  
+  # Extract from the nc name the year and parameter
+  nc_name <- str_extract(attributes(attributes(x)$file)$name, "abrasion.*[:digit:]{4}")
+
+  # Get the layer names and transform the number into abbreviated months
+  layer_name <- attributes(x)$z$`Time (Month)` %>%
+    month.abb[.]
+  
+  # Paste to get the month, parameter and year as a name
+  names(x) <- paste(layer_name,nc_name,sep="_")
+  
+  # Return the renamed rasterbrick
+  return(x)
+}
+
+
+```
+
+---
+
+# Chargement des données
+
+```{r}
+SAR_data_path <- "1_data/SAR"
+```
+
+```{r}
+# Median
+monthly_SAR_median <- list.files(path = SAR_data_path, pattern = "Median_Abrasion_.*[.]tif") %>%
+  # Define the path to the files
+  file.path(SAR_data_path, .) %>%
+  # Load them
+  future_map(., ~brick(.)) %>%
+  # Rename the layer with the month, parameter, and year
+  future_map(., ~rename_monthly_layers(.)) %>%
+  # Concatenate them all !
+  brick(.)
+```
+
+
+```{r, eval = FALSE}
+
+if(params$value == "pct25"){
+  pattern <- "pct25_abrasion*[.]tif"
+}else if(params$value == "median"){
+  pattern <- "Median_Abrasion_*[.]tif"
+}else if(params$value == "pct75"){
+  pattern <- "75thpercentile_Abrasion_*[.]tif"
+}else if(params$value == "uncertainty"){
+  pattern <- "Uncertainty_Abrasion*[.]tif"
+}
+
+```
+
+# Session info
+
+```{r session_info}
+
+sessionInfo()
+
+```

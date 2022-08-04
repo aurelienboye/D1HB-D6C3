@@ -1,0 +1,287 @@
+---
+title: "Exploration des données de campagnes"
+author: "A. Boyé"
+date: "`r format(Sys.time(), '%Y/%m/%d %X')`"
+output: 
+  rmdformats::readthedown:
+    code_folding: "hide"
+    highlight: "tango"
+    lightbox: TRUE
+    gallery: TRUE
+    thumbnails: FALSE # if TRUE display content images as thumbnails
+    toc_depth: 6
+    use_bookdown: true
+    fig_caption: true
+editor_options: 
+  chunk_output_type: console
+#params:
+# value:
+#    label: "Valeur :"
+#    value: median
+#    input: select
+#    choices: [pct25,median,pct75]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, eval = TRUE, cache = TRUE, plotly = FALSE)
+
+# Option of knitr to not print the NAs. Can be desactivated with `options(opts)` 
+opts <- options(knitr.kable.NA = "")
+```
+
+---
+
+# Packages
+
+```{r}
+library(tidyverse) # package for data handling
+library(ncdf4) # package for netcdf manipulation
+library(raster) # package for raster and brick manipulation
+library(broom) # to tidy model outputs
+library(janitor)
+
+library(sf)
+library(spatialEco)
+library(rasterVis) # for visulisation of the raster
+library(viridis)
+library(ggpointdensity)
+
+library(furrr) # parralelisation
+plan(multisession)
+```
+
+---
+
+# CHargement des données
+
+## Données de campagnes
+
+Données disponibles
+
+```{r}
+Campagnes_data_path <- "1_data/Campagnes_Halieutiques/Données_élevées"
+
+# Campagnes disponibles 
+fs::dir_tree(path = Campagnes_data_path, recurse = TRUE)
+```
+
+Traits de chaluts
+
+```{r}
+# Recupère toutes les données de traits
+data_files <- list.files(path = Campagnes_data_path, pattern = "Traits*", recursive = TRUE)
+
+# Enlève les deux premiers fichiers (CGFS_MOR_EMO_1990_2021 & CGFS_MOR_EST_1988_2021) car contenus dans CGFS_Total_1988_2021
+data_files <- data_files[-c(1,2)]
+
+traits_chaluts <- map_dfr(file.path(Campagnes_data_path,data_files), read.csv2,  dec = ".") %>%
+  mutate_if(is.character, as.factor)
+```
+
+## Données de SAR pré-traitées
+
+```{r}
+SAR_data_path <- "3_figs/raster_outputs"
+
+# Load the formated rasters
+SAR_data <- list.files(path = SAR_data_path, pattern = "*[.]tif") %>%
+  # Define the path to the files
+  file.path(SAR_data_path, .) %>%
+  # Load them
+  future_map(., ~raster(.)) %>%
+  # Concatenate them all !
+  brick(.)
+
+```
+
+## Emodnet cleaned
+
+```{r}
+emodnet <- readRDS("3_figs/raster_outputs/emodnet_cleaned_from_duplicates.rds")
+```
+
+---
+
+# Exploration de la donnée
+
+Années de prélevement
+
+```{r}
+
+ggplot(aes(x = Annee, col = Campagne),data = traits_chaluts) +
+  facet_wrap(vars(Campagne)) +
+  geom_bar() +
+  scale_x_continuous(minor_breaks = seq(from = min(traits_chaluts$Annee), to = max(traits_chaluts$Annee), by = 1)) +
+  theme(legend.position = "none")
+
+```
+
+Distribution des données dans l'espace et le temps
+
+```{r}
+gplot(SAR_data[["monthly_median_SAR_mean"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("world"))  +
+  scale_fill_viridis(option = "magma", na.value = NA, name = "Mean SAR across\nall months (2012-2020)") +
+  geom_point(aes(x = Long, y = Lat, col = Campagne),data = traits_chaluts) +
+  coord_equal(xlim = c(-15,15), ylim = c(40,62)) +
+  theme_light() + xlab("") + ylab("") 
+
+
+for(i in unique(traits_chaluts$Campagne)){
+  p <- ggplot(data = traits_chaluts %>% filter(Campagne == i)) + 
+  facet_wrap(vars(Campagne)) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("world"))  +
+  geom_pointdensity(aes(x = Long, y = Lat),adjust = .01) +
+  scale_color_viridis() +
+  coord_equal(xlim = c(-15,15), ylim = c(40,62)) +
+  theme_light() + xlab("") + ylab("") 
+  
+  plot(p)
+}
+```
+
+
+```{r, fig.height = 20, fig.width = 20}
+
+ggplot(data = traits_chaluts %>% filter(Campagne == "EVHOE")) + 
+  facet_wrap(vars(Campagne, Annee)) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("world"))  +
+  geom_pointdensity(aes(x = Long, y = Lat),adjust = .01) +
+  scale_color_viridis() +
+  coord_equal(xlim = c(-12,0), ylim = c(42,53)) +
+  theme_light() + xlab("") + ylab("") 
+  
+
+ggplot(data = traits_chaluts %>% filter(Campagne == "IBTS")) + 
+  facet_wrap(vars(Campagne, Annee)) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("world"))  +
+  geom_pointdensity(aes(x = Long, y = Lat),adjust = .01) +
+  scale_color_viridis() +
+  coord_equal(xlim = c(-2,10), ylim = c(48,62)) +
+  theme_light() + xlab("") + ylab("") 
+  
+
+ggplot(data = traits_chaluts %>% filter(Campagne == "CGFS")) + 
+  facet_wrap(vars(Campagne, Annee)) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("world"))  +
+  geom_pointdensity(aes(x = Long, y = Lat),adjust = .01) +
+  scale_color_viridis() +
+  coord_equal(xlim = c(-2,5), ylim = c(48,53)) +
+  theme_light() + xlab("") + ylab("") 
+  
+
+ggplot(data = traits_chaluts %>% filter(Campagne == "Medits-Corse")) + 
+  facet_wrap(vars(Campagne, Annee)) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("world"))  +
+  geom_pointdensity(aes(x = Long, y = Lat),adjust = .01) +
+  scale_color_viridis() +
+  coord_equal(xlim = c(8,11), ylim = c(40.5,43.5)) +
+  theme_light() + xlab("") + ylab("") 
+
+
+tmp <- unique(traits_chaluts$Campagne)[unique(traits_chaluts$Campagne) %in% c("Medits-Lion", "PELMED")]
+
+for(i in tmp){
+  p <- ggplot(data = traits_chaluts %>% filter(Campagne == i)) + 
+  facet_wrap(vars(Campagne, Annee)) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("world"))  +
+  geom_pointdensity(aes(x = Long, y = Lat),adjust = .01) +
+  scale_color_viridis() +
+  coord_equal(xlim = c(2,6), ylim = c(41,45)) +
+  theme_light() + xlab("") + ylab("") 
+  
+  plot(p)
+}
+
+```
+
+## Distribution des échantillons selon les BHT
+
+```{r, eval = TRUE}
+traits_chaluts_spdf <- SpatialPointsDataFrame(traits_chaluts[c("Long","Lat")], data = traits_chaluts %>% dplyr::select(-Lat, -Long),  proj4string = CRS("EPSG:4326"))
+
+emodnet_poly <- as(emodnet, Class = "Spatial")
+
+pip <- spatialEco::point.in.poly(traits_chaluts_spdf, emodnet_poly) 
+
+pip_df <- as.data.frame(pip) %>%
+  mutate_if(is.character, as.factor) #%>%
+  ## Remove points not associated to any BHT
+  #filter(!is.na(MSFD_BBHT))
+```
+
+Nombre de données par an par eunis 4/BHT
+
+```{r, eval = TRUE, fig.height = 20, fig.width = 20}
+number_samples <- pip_df %>%
+  dplyr::select(srm_fr, MSFD_BBHT, Allcomb, AllcombD, Annee, Trait) %>%
+  group_by(srm_fr, MSFD_BBHT, Allcomb, AllcombD, Annee) %>%
+  tally() %>%
+  ungroup()
+
+ggplot(aes(x = Annee, y = n, col = Allcomb),data = number_samples) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free_y") +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none")
+```
+
+Nombre de données sur la période 2012-2021
+
+```{r, fig.height = 20, fig.width = 20}
+
+number_samples_2012 <- pip_df %>%
+  filter(Annee >= 2012) %>%
+  dplyr::select(srm_fr, MSFD_BBHT, Allcomb, AllcombD, Trait) %>%
+  group_by(srm_fr, MSFD_BBHT, Allcomb, AllcombD) %>%
+  tally() %>%
+  ungroup()
+
+ggplot(aes(x = Allcomb, y = n),data = number_samples_2012) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none")
+
+```
+
+Nombre de données sur la période 2016-2021
+
+```{r, fig.height = 20, fig.width = 20}
+
+number_samples_2016 <- pip_df %>%
+  filter(Annee >= 2016) %>%
+  dplyr::select(srm_fr, MSFD_BBHT, Allcomb, AllcombD, Trait) %>%
+  group_by(srm_fr, MSFD_BBHT, Allcomb, AllcombD) %>%
+  tally() %>%
+  ungroup()
+
+ggplot(aes(x = Allcomb, y = n),data = number_samples_2016) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none")
+
+```
+
+## Distribution des échantillons selon le gradient de pression
+
+```{r, fig.height = 20, fig.width = 20}
+SAR_per_sample <- pip_df %>%
+  mutate(mean_SAR = extract(SAR_data[["monthly_median_SAR_mean"]], pip))
+
+ggplot(aes(x = mean_SAR, col = Allcomb),data = SAR_per_sample) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar() +
+  theme(legend.position = "none")
+
+```
+
+
+---
+
+# Session info
+
+```{r session_info}
+
+sessionInfo()
+
+```
