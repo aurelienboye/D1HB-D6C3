@@ -915,7 +915,7 @@ gplot(focal_cor) +
 
 # Analysis per BHT/MRU
 
-Load the formated data
+Load the formatted data
 
 ```{r}
 
@@ -964,9 +964,9 @@ saveRDS(emodnet_cl, file = "3_figs/raster_outputs/emodnet_cleaned_from_duplicate
 emodnet_cl <- readRDS("3_figs/raster_outputs/emodnet_cleaned_from_duplicates.rds")
 ```
 
-Extract values per BHT
+Extract mean values per BHT
 
-```{r, eval = FALSE}
+```{r, eval = TRUE}
 mean_per_bht <- extract(formatted_data, emodnet_cl, fun=mean, na.rm = TRUE)
 
 mean_per_bht_df <- as.data.frame(mean_per_bht)
@@ -1105,7 +1105,6 @@ for(i in unique(pip_df$MSFD_BBHT)){
   plot(p1 | p2)
 }
 ```
-
 
 ---
 

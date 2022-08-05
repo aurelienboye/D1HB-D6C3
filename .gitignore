@@ -1,5 +1,7 @@
 monthly_SAR_analysis_cache/
 monthly_SAR_analysis_files/
+annual_SAR_analysis_cache/
+annual_SAR_analysis_files/
 samples_exploration_cache/
 samples_exploration_files/
 *.html

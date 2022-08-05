@@ -8,6 +8,8 @@ Ce répertoire contient les codes des analyses exploratoires du D1HB pour évalu
 
 - L'analyse exploratoire des échantillons disponibles se trouve dans `samples_exploration.Rmd`
 
-Des bouts de codes potentiellement utile pour la suite se trouve dans le dossier `Chunks`
+Des bouts de codes potentiellement utile pour la suite se trouve dans le dossier `0_Chunks` 
+
+- e.g. script pour filter les espèces dans `Chunks > Laffargue > FBIT-WORKFLOW > WGFBIT_Celtic_S2_Part1_BioDataset.R` (from l. 264)
 
 PS: Les fichiers *html* issus de la compilation des *rmd* et les données sont trop lourds pour être inclus ici pour l'instant. 

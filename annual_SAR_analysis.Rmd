@@ -38,11 +38,16 @@ library(tidyverse) # package for data handling
 library(ncdf4) # package for netcdf manipulation
 library(raster) # package for raster and brick manipulation
 library(broom) # to tidy model outputs
+library(janitor)
 
+library(sf)
+library(spatialEco)
 library(rasterVis) # for visulisation of the raster
 library(viridis)
-library(plotly)
-library(gganimate)
+library(plotly) # For interactive plotting
+library(magick) # For making gif
+library(ggcorrplot)
+library(patchwork)
 
 library(furrr) # parralelisation
 plan(multisession)
@@ -51,22 +56,18 @@ plan(multisession)
 # Functions
 
 ```{r}
-rename_monthly_layers <- function(x){
+
+rename_layers <- function(x){
   
   # Extract from the nc name the year and parameter
-  nc_name <- str_extract(attributes(attributes(x)$file)$name, "abrasion.*[:digit:]{4}")
+  layer_name <- str_extract(attributes(attributes(x)$file)$name, "(?<=(SAR/)).*_Abrasion.*[:digit:]{4}")
 
-  # Get the layer names and transform the number into abbreviated months
-  layer_name <- attributes(x)$z$`Time (Month)` %>%
-    month.abb[.]
-  
   # Paste to get the month, parameter and year as a name
-  names(x) <- paste(layer_name,nc_name,sep="_")
+  names(x) <- layer_name
   
   # Return the renamed rasterbrick
   return(x)
 }
-
 
 ```
 
@@ -74,37 +75,646 @@ rename_monthly_layers <- function(x){
 
 # Chargement des données
 
+## Données d'abrasion
+
 ```{r}
 SAR_data_path <- "1_data/SAR"
 ```
 
 ```{r}
 # Median
-monthly_SAR_median <- list.files(path = SAR_data_path, pattern = "Median_Abrasion_.*[.]tif") %>%
+median_SAR <- list.files(path = SAR_data_path, pattern = "Median_Abrasion_20.*[.]tif") %>%
   # Define the path to the files
   file.path(SAR_data_path, .) %>%
   # Load them
   future_map(., ~brick(.)) %>%
   # Rename the layer with the month, parameter, and year
-  future_map(., ~rename_monthly_layers(.)) %>%
+  future_map(., ~rename_layers(.)) %>%
+  # Concatenate them all !
+  brick(.)
+
+p75_SAR <- list.files(path = SAR_data_path, pattern = "75thpercentile_Abrasion_20.*[.]tif") %>%
+  # Define the path to the files
+  file.path(SAR_data_path, .) %>%
+  # Load them
+  future_map(., ~brick(.)) %>%
+  # Rename the layer with the month, parameter, and year
+  future_map(., ~rename_layers(.)) %>%
+  # Concatenate them all !
+  brick(.)
+
+p25_SAR <- list.files(path = SAR_data_path, pattern = "pct25_abrasion20.*[.]tif") %>%
+  # Define the path to the files
+  file.path(SAR_data_path, .) %>%
+  # Load them
+  future_map(., ~brick(.)) %>%
+  # Rename the layer with the month, parameter, and year
+  future_map(., ~rename_layers(.)) %>%
+  # Concatenate them all !
+  brick(.)
+
+incertitude_SAR <- list.files(path = SAR_data_path, pattern = "Uncertainty_Abrasion20.*[.]tif") %>%
+  # Define the path to the files
+  file.path(SAR_data_path, .) %>%
+  # Load them
+  future_map(., ~brick(.)) %>%
+  # Rename the layer with the month, parameter, and year
+  future_map(., ~rename_layers(.)) %>%
   # Concatenate them all !
   brick(.)
 ```
 
+## Emodnet cleaned
+
+```{r}
+emodnet <- readRDS("3_figs/raster_outputs/emodnet_cleaned_from_duplicates.rds")
+```
+
+---
+
+# Variabilité dans le temps des données de SAR
+
+## Sar moyen (sans log-transformation)
+
+```{r, eval = FALSE}
+data <- median_SAR
+folder_name <- "3_figs/gif_annual_median_SAR_no-log"
+```
 
 ```{r, eval = FALSE}
 
-if(params$value == "pct25"){
-  pattern <- "pct25_abrasion*[.]tif"
-}else if(params$value == "median"){
-  pattern <- "Median_Abrasion_*[.]tif"
-}else if(params$value == "pct75"){
-  pattern <- "75thpercentile_Abrasion_*[.]tif"
-}else if(params$value == "uncertainty"){
-  pattern <- "Uncertainty_Abrasion*[.]tif"
+# To plot data for every year : count the number of layers
+n_layer <- 1:nlayers(data)
+
+dir.create(folder_name)
+
+for(i in n_layer){
+  
+p <- gplot(data[[i]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france")) +
+  facet_wrap(~ names(data[[i]]), ncol = 4, labeller = labeller(variable = function(x){str_replace_all(x, "_", " ")}, multi_line = TRUE)) +
+  scale_fill_viridis(option = "magma", limits = range(raster::values(data), na.rm = TRUE), na.value = NA, name = "Median SAR") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("")
+
+layer_name <- names(data[[i]])
+
+ggsave(filename = paste0(folder_name,"/",layer_name,".png"), plot = p, device = png, dpi = 500)
+  
+}
+```
+
+```{r, eval = FALSE}
+## list file names and read in
+imgs <- list.files(folder_name, full.names = TRUE)
+img_list <- lapply(imgs, image_read)
+
+## join the images together
+img_joined <- image_join(img_list)
+
+## animate at 2 frames per second
+img_animated <- image_animate(img_joined, fps = 2)
+
+## view animated image
+#img_animated
+
+## save to disk
+image_write(image = img_animated,
+            path = paste0(folder_name,".gif"))
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/gif_annual_median_SAR_no-log.gif"))
+```
+
+## Sar moyen (log)
+
+```{r, eval = FALSE}
+data <- median_SAR
+folder_name <- "3_figs/gif_annual_median_SAR"
+```
+
+```{r, eval = FALSE}
+
+# To plot data for every year : count the number of layers
+n_layer <- 1:nlayers(data)
+
+dir.create(folder_name)
+
+for(i in n_layer){
+  
+p <- gplot(data[[i]]) + 
+  geom_raster(aes(fill = log1p(value)), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france")) +
+  facet_wrap(~ names(data[[i]]), ncol = 4, labeller = labeller(variable = function(x){str_replace_all(x, "_", " ")}, multi_line = TRUE)) +
+  scale_fill_viridis(option = "magma", limits = range(log1p(raster::values(data)), na.rm = TRUE), na.value = NA, name = "Median SAR (log1p)") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("")
+
+layer_name <- names(data[[i]])
+
+ggsave(filename = paste0(folder_name,"/",layer_name,".png"), plot = p, device = png, dpi = 500)
+  
+}
+```
+
+```{r, eval = FALSE}
+## list file names and read in
+imgs <- list.files(folder_name, full.names = TRUE)
+img_list <- lapply(imgs, image_read)
+
+## join the images together
+img_joined <- image_join(img_list)
+
+## animate at 2 frames per second
+img_animated <- image_animate(img_joined, fps = 2)
+
+## view animated image
+#img_animated
+
+## save to disk
+image_write(image = img_animated,
+            path = paste0(folder_name,".gif"))
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/gif_annual_median_SAR.gif"))
+```
+
+## Sar p75
+
+```{r, eval = FALSE}
+data <- p75_SAR
+folder_name <- "3_figs/gif_annual_p75_SAR"
+```
+
+```{r, eval = FALSE}
+
+# To plot data for every year : count the number of layers
+n_layer <- 1:nlayers(data)
+
+dir.create(folder_name)
+
+for(i in n_layer){
+  
+p <- gplot(data[[i]]) + 
+  geom_raster(aes(fill = log1p(value)), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france")) +
+  facet_wrap(~ names(data[[i]]), ncol = 4, labeller = labeller(variable = function(x){str_replace_all(x, "_", " ")}, multi_line = TRUE)) +
+  scale_fill_viridis(option = "magma", limits = range(log1p(raster::values(data)), na.rm = TRUE), na.value = NA, name = "p75 SAR (log1p)") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("")
+
+layer_name <- names(data[[i]])
+
+ggsave(filename = paste0(folder_name,"/",layer_name,".png"), plot = p, device = png, dpi = 500)
+  
+}
+```
+
+```{r, eval = FALSE}
+## list file names and read in
+imgs <- list.files(folder_name, full.names = TRUE)
+img_list <- lapply(imgs, image_read)
+
+## join the images together
+img_joined <- image_join(img_list)
+
+## animate at 2 frames per second
+img_animated <- image_animate(img_joined, fps = 2)
+
+## view animated image
+#img_animated
+
+## save to disk
+image_write(image = img_animated,
+            path = paste0(folder_name,".gif"))
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/gif_annual_p75_SAR.gif"))
+```
+
+## Sar p25
+
+```{r, eval = FALSE}
+data <- p25_SAR
+folder_name <- "3_figs/gif_annual_p25_SAR"
+```
+
+```{r, eval = FALSE}
+
+# To plot data for every year : count the number of layers
+n_layer <- 1:nlayers(data)
+
+dir.create(folder_name)
+
+for(i in n_layer){
+  
+p <- gplot(data[[i]]) + 
+  geom_raster(aes(fill = log1p(value)), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france")) +
+  facet_wrap(~ names(data[[i]]), ncol = 4, labeller = labeller(variable = function(x){str_replace_all(x, "_", " ")}, multi_line = TRUE)) +
+  scale_fill_viridis(option = "magma", limits = range(log1p(raster::values(data)), na.rm = TRUE), na.value = NA, name = "p25 SAR (log1p)") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("")
+
+layer_name <- names(data[[i]])
+
+ggsave(filename = paste0(folder_name,"/",layer_name,".png"), plot = p, device = png, dpi = 500)
+  
+}
+```
+
+```{r, eval = FALSE}
+## list file names and read in
+imgs <- list.files(folder_name, full.names = TRUE)
+img_list <- lapply(imgs, image_read)
+
+## join the images together
+img_joined <- image_join(img_list)
+
+## animate at 2 frames per second
+img_animated <- image_animate(img_joined, fps = 2)
+
+## view animated image
+#img_animated
+
+## save to disk
+image_write(image = img_animated,
+            path = paste0(folder_name,".gif"))
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/gif_annual_p25_SAR.gif"))
+```
+
+## Sar incertitude
+
+```{r, eval = FALSE}
+data <- incertitude_SAR
+folder_name <- "3_figs/gif_annual_incertitude_SAR"
+```
+
+```{r, eval = FALSE}
+
+# To plot data for every year : count the number of layers
+n_layer <- 1:nlayers(data)
+
+dir.create(folder_name)
+
+for(i in n_layer){
+  
+p <- gplot(data[[i]]) + 
+  geom_raster(aes(fill = log1p(value)), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france")) +
+  facet_wrap(~ names(data[[i]]), ncol = 4, labeller = labeller(variable = function(x){str_replace_all(x, "_", " ")}, multi_line = TRUE)) +
+  scale_fill_viridis(option = "turbo", direction = 1, limits = c(0,1), na.value = NA, name = "SAR uncertainty") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("")
+
+layer_name <- names(data[[i]])
+
+ggsave(filename = paste0(folder_name,"/",layer_name,".png"), plot = p, device = png, dpi = 500)
+  
+}
+```
+
+```{r, eval = FALSE}
+## list file names and read in
+imgs <- list.files(folder_name, full.names = TRUE)
+img_list <- lapply(imgs, image_read)
+
+## join the images together
+img_joined <- image_join(img_list)
+
+## animate at 2 frames per second
+img_animated <- image_animate(img_joined, fps = 2)
+
+## view animated image
+#img_animated
+
+## save to disk
+image_write(image = img_animated,
+            path = paste0(folder_name,".gif"))
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/gif_annual_incertitude_SAR.gif"))
+```
+
+---
+
+# Calculs sur le SAR median
+
+```{r SAR_median_integration}
+time <- 1 : nlayers(median_SAR)
+
+trend_slope <- function(x){
+  if (is.na(x[1])){ 
+    trend_slope <- NA } 
+  else{ 
+    m <- lm(x~time)
+    trend_slope <- m$coefficients[2]
+  }
+  return(trend_slope)
 }
 
+trend_r_squared <- function(x){
+  if (is.na(x[1])){ 
+    r_squared <- NA } 
+  else{ 
+    m <- lm(x~time)
+    r_squared <- glance(m)$r.squared
+  }
+  return(r_squared)
+}
+
+trend_p_value <- function(x){
+  if (is.na(x[1])){ 
+    p_value <- NA } 
+  else{ 
+    m <- lm(x~time)
+    p_value <- glance(m)$p.value
+  }
+  return(p_value)
+}
+
+SAR_trend_slope <- calc(median_SAR, fun = trend_slope)
+SAR_trend_r_squared <- calc(median_SAR, fun = trend_r_squared)
+SAR_trend_p_value <- calc(median_SAR, fun = trend_p_value)
+SAR_sum <- calc(median_SAR, sum)
+SAR_mean <- calc(median_SAR, mean)
+SAR_max <- calc(median_SAR, max)
+SAR_min <- calc(median_SAR, min)
+SAR_sd <- calc(median_SAR, sd)
+
+summary_median_SAR <- brick(SAR_trend_slope,SAR_trend_r_squared,SAR_trend_p_value, SAR_sum, SAR_mean, SAR_max, SAR_min, SAR_sd)
+
+names(summary_median_SAR) <- c("SAR_trend_slope","SAR_trend_r_squared","SAR_trend_p_value", "SAR_sum", "SAR_mean", "SAR_max", "SAR_min", "SAR_sd")
+
+outfile <- writeRaster(summary_median_SAR, filename=paste0('3_figs/raster_outputs/annual_median_',names(summary_median_SAR),'.tif'), format="GTiff", overwrite=TRUE,options=c("INTERLEAVE=BAND","COMPRESS=LZW"), bylayer = TRUE)
 ```
+
+### Tendance dans le temps 
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_trend_slope"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france")) +
+  scale_fill_distiller(type="div", palette = "RdBu", na.value = NA, name = "SAR trend slope") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("")
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_trend_slope.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_trend_slope_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_trend_slope.png"))
+```
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_trend_p_value"]]) + 
+  geom_raster(aes(fill = cut(value, breaks = c(0,0.01,0.05, 0.1, 1), include.lowest = TRUE)), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france"))  +
+  scale_fill_viridis_d(option = "turbo", direction = -1, na.translate = FALSE, na.value = NA, name = "SAR trend p.value") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_trend_p_value.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_trend_p_value_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_trend_p_value.png"))
+```
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_trend_r_squared"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france"))  +
+  scale_fill_viridis(option = "mako", na.value = NA, name = "SAR trend R2") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_trend_r_squared.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_trend_r_squared_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_trend_r_squared.png"))
+```
+
+### Impact cumulé (somme du SAR median)
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_sum"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france"))  +
+  scale_fill_viridis(option = "magma", na.value = NA, name = "SAR_sum") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_sum.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_sum_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_sum.png"))
+```
+
+### Moyenne, max,min et sd du SAR median
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_mean"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france"))  +
+  scale_fill_viridis(option = "magma", na.value = NA, name = "SAR_mean") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_mean.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_mean_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_mean.png"))
+```
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_max"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france"))  +
+  scale_fill_viridis(option = "magma", na.value = NA, name = "SAR_max") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_max.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_max_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_max.png"))
+```
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_min"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france"))  +
+  scale_fill_viridis(option = "magma", na.value = NA, name = "SAR_min") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_min.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_min_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_min.png"))
+```
+
+```{r, eval = FALSE}
+p <- gplot(summary_median_SAR[["SAR_sd"]]) + 
+  geom_raster(aes(fill = value), na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), data = map_data("france"))  +
+  scale_fill_viridis(option = "mako", na.value = NA, name = "SAR_sd") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_sd.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_sd_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_sd.png"))
+```
+
+### Identification de zones aux profils similaires
+
+```{r}
+summary_median_SAR_spdf <- as.data.frame(summary_median_SAR, xy = TRUE) %>%
+  #na.omit() %>%
+  mutate(SAR_trend_category = case_when(
+    SAR_trend_p_value > 0.05 ~ "No trend",
+    SAR_trend_p_value <= 0.05 & SAR_trend_slope < 0 ~ "Decreasing trend",
+    SAR_trend_p_value <= 0.05 & SAR_trend_slope > 0 ~ "Increasing trend",
+    TRUE ~ NA_character_
+  )) %>%
+  mutate(SAR_mean_category = cut(SAR_mean, breaks = c(0, mean(SAR_mean, na.rm = TRUE), quantile(SAR_mean, probs = 0.9, na.rm = TRUE), max(SAR_mean, na.rm = TRUE)), labels = c(paste("Low : <",round(mean(SAR_mean, na.rm = TRUE),2), "(mean)"), paste("Medium : >",round(mean(SAR_mean, na.rm = TRUE),2), "(mean)"), paste("High : >",round(quantile(SAR_mean, probs = 0.9, na.rm = TRUE),2), "(p90)")), include.lowest = TRUE)) %>%
+  mutate(SAR_mean_category_labels = cut(SAR_mean, breaks = c(0, mean(SAR_mean, na.rm = TRUE), quantile(SAR_mean, probs = 0.9, na.rm = TRUE), max(SAR_mean, na.rm = TRUE)), labels = c("Low mean SAR", "Medium mean SAR", "High mean SAR"), include.lowest = TRUE)) %>%
+  unite(bi_class, c(SAR_mean_category_labels, SAR_trend_category), sep = " / ", remove = FALSE) %>%
+  mutate_if(is.character,as.factor) %>%
+  mutate(bi_class  = factor(bi_class, levels = c("High mean SAR / Increasing trend", "High mean SAR / No trend", "High mean SAR / Decreasing trend", "Medium mean SAR / Increasing trend", "Medium mean SAR / No trend", "Medium mean SAR / Decreasing trend", "Low mean SAR / Increasing trend", "Low mean SAR / No trend", "Low mean SAR / Decreasing trend"), ordered = TRUE))
+
+saveRDS(summary_median_SAR_spdf,file="3_figs/raster_outputs/summary_median_SAR_spdf.rds")
+```
+
+#### Catégories selon les tendances 
+
+```{r, eval = FALSE}
+p <- ggplot(summary_median_SAR_spdf, aes(x = x, y = y, fill = SAR_trend_category)) + 
+  geom_tile(na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), inherit.aes = FALSE, data = map_data("france"))  +
+  scale_fill_viridis_d(option = "rocket", na.value = NA, na.translate = FALSE, name = "SAR trend category") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_trend_category.png"), plot = p, device = png, dpi = 500)
+p
+```
+
+```{r annual_median_SAR_trend_category_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_trend_category.png"))
+```
+
+#### Catégories selon la moyenne du SAR median
+
+```{r, eval = FALSE}
+p <- ggplot(summary_median_SAR_spdf, aes(x = x, y = y, fill = SAR_mean_category)) + 
+  geom_tile(na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), inherit.aes = FALSE, data = map_data("france"))  +
+  scale_fill_viridis_d(option = "mako", na.value = NA, na.translate = FALSE, name = "SAR mean category") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_mean_category.png"), plot = p, device = png, dpi = 500)
+p
+```
+
+```{r annual_median_SAR_mean_category_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_mean_category.png"))
+```
+
+#### Identification des zones selon Mean SAR/Trend
+
+```{r, eval = FALSE}
+p <- ggplot(summary_median_SAR_spdf, aes(x = x, y = y, fill = bi_class)) + 
+  geom_tile(na.rm = TRUE) +
+  geom_polygon(aes(x = long, y = lat, group = group), inherit.aes = FALSE, data = map_data("france"))  +
+  scale_fill_viridis_d(option = "turbo", direction = -1, na.value = NA, na.translate = FALSE, name = "Mean SAR/Trend") +
+  coord_equal() +
+  theme_light() + xlab("") + ylab("") 
+
+ggsave(filename = paste0("3_figs/annual_median_SAR_mean-trend_category.png"), plot = p, device = png, dpi = 500)
+ggplotly(p)
+```
+
+```{r annual_median_SAR_mean-trend_category_plot, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_mean-trend_category.png"))
+```
+
+---
+
+# Analysis per BHT/MRU
+
+## Median SAR per BHT
+
+```{r, eval = FALSE}
+mean_per_bht <- extract(median_SAR, emodnet, fun=mean, na.rm = TRUE)
+
+mean_per_bht_df <- as.data.frame(mean_per_bht)
+
+mean_per_bht_df <- bind_cols(emodnet, mean_per_bht_df)
+
+saveRDS(mean_per_bht_df, file = "3_figs/raster_outputs/annual_mean_per_bht_df.rds")
+```
+
+```{r}
+mean_per_bht_df <- readRDS("3_figs/raster_outputs/annual_mean_per_bht_df.rds")
+
+mean_per_bht_df_cl <- mean_per_bht_df %>% 
+  as.data.frame(.) %>%
+  select(Energy, Biozone, Substrate, EUNIScomb, EUNIScombD, MSFD_BBHT, srm_fr, srm_en, Shape_Leng, Shape_Area, Surface, contains("Median_Abrasion")) %>%
+  # I removed the polygon but I keep track of their id through the rownames
+  rownames_to_column("polygon_id") %>%
+  gather(metric, value,-Energy, -Biozone, -Substrate, -EUNIScomb, -EUNIScombD, -MSFD_BBHT, -srm_fr, -srm_en, -Shape_Leng, -Shape_Area, -Surface, -polygon_id) %>%
+  separate(metric, into = c("metric", "pressure", "year"), sep = "_") %>%
+  unite("metric", c("metric", "pressure")) %>%
+  spread(metric, value)
+
+saveRDS(mean_per_bht_df_cl, file = "3_figs/raster_outputs/annual_mean_per_bht_df_cl.rds")
+```
+
+```{r}
+mean_per_bht_df_cl <- readRDS("3_figs/raster_outputs/annual_mean_per_bht_df_cl.rds")
+```
+
+```{r, eval =FALSE, fig.height = 20, fig.width = 15}
+# Initial width x 1200 height
+ggplot(aes(x = as.numeric(as.character(year)), y = Median_Abrasion,col = MSFD_BBHT, group = polygon_id),data = mean_per_bht_df_cl) +
+  facet_wrap(vars(srm_fr,MSFD_BBHT, EUNIScomb), scales = "free_y") +
+  geom_point(alpha = 0.5) +
+  geom_line() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = "none")
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_SAR_per_BHT-MSR.png"))
+```
+
+---
 
 # Session info
 
