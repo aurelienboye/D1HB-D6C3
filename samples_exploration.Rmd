@@ -274,6 +274,19 @@ ggplot(aes(x = mean_SAR, col = Allcomb),data = SAR_per_sample) +
 
 ```
 
+## Distribution des échantillons (à partir de 2016) selon le gradient de pression
+
+```{r, fig.height = 20, fig.width = 20}
+SAR_per_sample <- pip_df %>%
+  mutate(mean_SAR = extract(SAR_data[["monthly_median_SAR_mean"]], pip)) %>%
+  filter(Annee >= 2016)
+
+ggplot(aes(x = mean_SAR, col = Allcomb),data = SAR_per_sample) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar() +
+  theme(legend.position = "none")
+
+```
 
 ---
 

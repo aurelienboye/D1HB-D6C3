@@ -408,7 +408,7 @@ knitr::include_graphics(normalizePath("3_figs/gif_annual_incertitude_SAR.gif"))
 
 # Calculs sur le SAR median
 
-```{r SAR_median_integration}
+```{r SAR_median_integration, eval = FALSE}
 time <- 1 : nlayers(median_SAR)
 
 trend_slope <- function(x){
@@ -593,7 +593,7 @@ knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_sd.png"))
 
 ### Identification de zones aux profils similaires
 
-```{r}
+```{r, eval = FALSE}
 summary_median_SAR_spdf <- as.data.frame(summary_median_SAR, xy = TRUE) %>%
   #na.omit() %>%
   mutate(SAR_trend_category = case_when(
@@ -669,7 +669,7 @@ knitr::include_graphics(normalizePath("3_figs/annual_median_SAR_mean-trend_categ
 
 # Analysis per BHT/MRU
 
-## Median SAR per BHT
+## Median SAR par an par polygon/BHT
 
 ```{r, eval = FALSE}
 mean_per_bht <- extract(median_SAR, emodnet, fun=mean, na.rm = TRUE)
@@ -681,7 +681,7 @@ mean_per_bht_df <- bind_cols(emodnet, mean_per_bht_df)
 saveRDS(mean_per_bht_df, file = "3_figs/raster_outputs/annual_mean_per_bht_df.rds")
 ```
 
-```{r}
+```{r, eval = FALSE}
 mean_per_bht_df <- readRDS("3_figs/raster_outputs/annual_mean_per_bht_df.rds")
 
 mean_per_bht_df_cl <- mean_per_bht_df %>% 
@@ -702,7 +702,7 @@ mean_per_bht_df_cl <- readRDS("3_figs/raster_outputs/annual_mean_per_bht_df_cl.r
 ```
 
 ```{r, eval =FALSE, fig.height = 20, fig.width = 15}
-# Initial width x 1200 height
+# 2000 x 2000 height
 ggplot(aes(x = as.numeric(as.character(year)), y = Median_Abrasion,col = MSFD_BBHT, group = polygon_id),data = mean_per_bht_df_cl) +
   facet_wrap(vars(srm_fr,MSFD_BBHT, EUNIScomb), scales = "free_y") +
   geom_point(alpha = 0.5) +
@@ -713,6 +713,182 @@ ggplot(aes(x = as.numeric(as.character(year)), y = Median_Abrasion,col = MSFD_BB
 ```{r, echo=FALSE, fig.cap="", out.width = '100%'}
 knitr::include_graphics(normalizePath("3_figs/annual_SAR_per_BHT-MSR.png"))
 ```
+
+```{r, eval = FALSE}
+# 2000 x 2000 height
+ggplot(aes(x = as.numeric(as.character(year)), y = Median_Abrasion,col = MSFD_BBHT),data = mean_per_bht_df_cl) +
+  facet_wrap(vars(srm_fr,MSFD_BBHT, EUNIScomb), scales = "free_y") +
+  geom_smooth(method = "loess") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = "none")
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/annual_SAR_per_BHT-MSR_smooth.png"))
+```
+
+## Presence/absence of pressure (SAR > 0) per surface per bht
+
+```{r, fig.height = 20, fig.width = 20}
+category_of_events_per_year <- mean_per_bht_df_cl %>%
+  mutate(category = case_when(
+    Median_Abrasion == 0 ~ "No pressure",
+    is.na(Median_Abrasion) ~ "No data",
+    Median_Abrasion > 0 ~ "Pressure",
+  )) %>%
+  group_by(srm_fr, MSFD_BBHT, EUNIScomb, category, year) %>%
+  summarise(surface = sum(Surface)) %>%
+  ungroup()
+
+ggplot(aes(x = as.numeric(as.character(year)), y = surface, fill = category), data = category_of_events_per_year) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free_y") +
+  geom_bar(stat = "identity") +
+  xlab("Années")
+
+```
+
+## Number of pressure event per polygon surface per bht
+
+```{r, fig.height = 30, fig.width = 30}
+number_of_events <- mean_per_bht_df_cl %>%
+  mutate(category = case_when(
+    Median_Abrasion == 0 ~ "No pressure",
+    is.na(Median_Abrasion) ~ "No data",
+    Median_Abrasion > 0 ~ "Pressure",
+  )) %>%
+  # Count the number of year that each polygon spent in a given category
+  distinct(srm_fr, MSFD_BBHT, EUNIScomb, category, Surface, year) %>%
+  group_by(srm_fr, MSFD_BBHT, EUNIScomb, category, Surface) %>%
+  tally() %>%
+  ungroup()
+
+ggplot(aes(x = factor(n, ordered = TRUE), y = Surface, fill = category), data = number_of_events) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity", position = "dodge") +
+  ylab("Surface") + xlab("Nombre d'années")
+
+ggplot(aes(x = factor(n, ordered = TRUE), y = Surface, fill = category), data = number_of_events %>% filter(category == "No data")) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("#F8766D")) +
+  ylab("Surface") + xlab("Nombre d'années") + ggtitle("No data")
+
+ggplot(aes(x = factor(n, ordered = TRUE), y = Surface, fill = category), data = number_of_events %>% filter(category == "No pressure")) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("#00BA38")) +
+  ylab("Surface") + xlab("Nombre d'années") + ggtitle("No pressure")
+
+ggplot(aes(x = factor(n, ordered = TRUE), y = Surface, fill = category), data = number_of_events %>% filter(category == "Pressure")) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("#619CFF")) +
+  ylab("Surface") + xlab("Nombre d'années") + ggtitle("Pressure")
+```
+
+## Variation du SAR selon les années & SAR cumulé
+
+```{r, fig.height = 15, fig.width = 15}
+
+for(i in unique(mean_per_bht_df_cl$MSFD_BBHT)){
+  p1 <- ggplot(aes(x = as.numeric(as.character(year)), y=Median_Abrasion, col = polygon_id),data = mean_per_bht_df_cl %>% filter(MSFD_BBHT == i) %>% filter(!is.na(Median_Abrasion)))+
+  facet_wrap(vars(srm_fr,MSFD_BBHT)) +
+  geom_area() +
+  theme(legend.position = "none") +
+  ylab("Abrasion médiane") + xlab("Années")
+  
+  p2 <- ggplot(aes(x = as.numeric(as.character(year)), y=cumsum(Median_Abrasion), col = polygon_id),data = mean_per_bht_df_cl %>% filter(MSFD_BBHT == i) %>% filter(!is.na(Median_Abrasion)))+
+  facet_wrap(vars(srm_fr,MSFD_BBHT)) +
+  geom_area() +
+  theme(legend.position = "none") +
+  ylab("Abrasion médiane cumulée") + xlab("Années")
+
+  try(plot(p1 / p2))
+}
+
+```
+
+## Distribution du SAR médian selon les BHT et les années
+
+```{r, eval = FALSE}
+
+library(ggridges)
+
+ggplot(mean_per_bht_df_cl, aes(x = Median_Abrasion, y = MSFD_BBHT, fill = year)) +
+  facet_wrap(vars(srm_fr), scales = "free", ncol = 4) +
+  geom_density_ridges(scale = 0.8,
+    jittered_points = TRUE,
+    position = "raincloud", point_size = 0.4, point_alpha = 0.5, alpha = 0.5,
+    aes(point_color = year, point_fill = year),
+  ) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  coord_cartesian(clip = "off") +
+  theme_ridges()
+
+```
+
+```{r, echo=FALSE, fig.cap="", out.width = '100%'}
+knitr::include_graphics(normalizePath("3_figs/joyplot_distrib_SAR_SRM-year.png"))
+```
+
+```{r, fig.height = 20, fig.width = 20}
+library(ggridges)
+
+for (i in unique(mean_per_bht_df_cl$MSFD_BBHT)){
+  p <- ggplot(mean_per_bht_df_cl %>% filter(MSFD_BBHT == i), aes(x = Median_Abrasion, y = year, fill = year)) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free", ncol = 4) +
+  geom_density_ridges(scale = 0.8,
+    jittered_points = TRUE,
+    position = "raincloud", point_size = 0.4, point_alpha = 0.5, alpha = 0.5,
+    aes(point_color = year, point_fill = year),
+  ) +
+  scale_fill_viridis_d()+
+  scale_discrete_manual("point_color",values = viridis(length(unique(mean_per_bht_df_cl %>% filter(MSFD_BBHT == i) %>% pull(year))))) +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_discrete(expand = c(0, 0)) +
+  coord_cartesian(clip = "off") +
+  theme_ridges() +
+  theme(legend.position = "none")
+  
+  plot(p)
+}
+
+```
+
+
+## PS : nombre de polygon par BHT dans cette analyse
+
+```{r, fig.height = 15, fig.width = 15}
+
+number_of_poly <- mean_per_bht_df_cl %>%
+  distinct(MSFD_BBHT,EUNIScomb, polygon_id) %>%
+  group_by(MSFD_BBHT,EUNIScomb) %>%
+  tally()
+
+ggplot(aes(x = EUNIScomb, y = n, fill = MSFD_BBHT), data = number_of_poly) +
+  facet_wrap(vars(MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none")
+
+```
+
+Détaillé par SRM
+
+```{r, fig.height = 20, fig.width = 20}
+
+number_of_poly <- mean_per_bht_df_cl %>%
+  distinct(srm_fr,MSFD_BBHT,EUNIScomb, polygon_id) %>%
+  group_by(srm_fr,MSFD_BBHT,EUNIScomb) %>%
+  tally()
+
+ggplot(aes(x = EUNIScomb, y = n, fill = MSFD_BBHT), data = number_of_poly) +
+  facet_wrap(vars(srm_fr, MSFD_BBHT), scales = "free") +
+  geom_bar(stat = "identity") +
+  theme(legend.position = "none")
+
+```
+
+
 
 ---
 
